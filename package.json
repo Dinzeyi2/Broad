@@ -1,0 +1,15 @@
+{
+  "name": "holdback-mvp-backend",
+  "version": "0.1.0",
+  "description": "Railway-ready MVP backend for a gas authorization hold restoration demo.",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
