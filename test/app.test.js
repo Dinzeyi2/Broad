@@ -57,3 +57,51 @@ test('accepts waitlist signups', async () => withServer(async (baseUrl) => {
   assert.equal(response.status, 201);
   assert.equal(body.signup.email, 'founder@example.com');
 }));
+
+
+test('bank webhook detects a gas hold and settlement auto-collects repayment', async () => withServer(async (baseUrl) => {
+  const providerTransactionId = `bank_txn_webhook_${Date.now()}`;
+  const pendingResponse = await fetch(`${baseUrl}/api/bank/webhooks/transactions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      providerTransactionId,
+      merchant: 'Chevron',
+      category: 'gas_station',
+      status: 'pending',
+      authorizedAmountCents: 8500,
+      estimatedFinalAmountCents: 1200,
+    }),
+  });
+  const pending = await pendingResponse.json();
+
+  assert.equal(pendingResponse.status, 202);
+  assert.equal(pending.transaction.eligibleForAdvance, true);
+
+  const advanceResponse = await fetch(`${baseUrl}/api/advances`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ transactionId: pending.transaction.id, feeCents: 350 }),
+  });
+  const advanceBody = await advanceResponse.json();
+  assert.equal(advanceResponse.status, 201);
+  assert.equal(advanceBody.advance.status, 'active');
+
+  const settledResponse = await fetch(`${baseUrl}/api/bank/webhooks/transactions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      providerTransactionId,
+      merchant: 'Chevron',
+      category: 'gas_station',
+      status: 'settled',
+      authorizedAmountCents: 8500,
+      settledAmountCents: 1200,
+    }),
+  });
+  const settled = await settledResponse.json();
+
+  assert.equal(settledResponse.status, 202);
+  assert.equal(settled.transaction.status, 'settled');
+  assert.ok(settled.advances.some((advance) => advance.id === advanceBody.advance.id && advance.status === 'repaid'));
+}));

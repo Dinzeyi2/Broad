@@ -1,13 +1,17 @@
 import { createServer } from 'node:http';
 import {
   addWaitlistSignup,
+  collectRepayment,
   createAdvance,
+  getDemoAccount,
   getDemoUser,
   getTransaction,
+  listAccounts,
   listAdvances,
+  listLedgerEntries,
   listTransactions,
   listWaitlistSignups,
-  repayAdvance,
+  upsertBankTransaction,
 } from './store.js';
 
 const json = (response, status, payload) => {
@@ -43,7 +47,17 @@ export function createApp() {
 
       if (request.method === 'GET' && url.pathname === '/api/demo/dashboard') {
         const user = getDemoUser();
-        return json(response, 200, { user, transactions: listTransactions(user.id), advances: listAdvances(user.id) });
+        return json(response, 200, {
+          user,
+          accounts: listAccounts(user.id),
+          transactions: listTransactions(user.id),
+          advances: listAdvances(user.id),
+          ledger: listLedgerEntries(user.id),
+        });
+      }
+
+      if (request.method === 'GET' && url.pathname === '/api/accounts') {
+        return json(response, 200, { accounts: listAccounts() });
       }
 
       if (request.method === 'GET' && url.pathname === '/api/transactions') {
@@ -66,7 +80,7 @@ export function createApp() {
           return json(response, 400, { error: 'feeCents must be an integer from 0 to 2500' });
         }
         const advance = createAdvance({ transactionId: body.transactionId, feeCents: body.feeCents });
-        return json(response, 201, { advance, user: getDemoUser() });
+        return json(response, 201, { advance, account: getDemoAccount(), user: getDemoUser() });
       }
 
       if (request.method === 'GET' && url.pathname === '/api/advances') {
@@ -75,8 +89,34 @@ export function createApp() {
 
       const repayMatch = url.pathname.match(/^\/api\/advances\/([^/]+)\/repay$/);
       if (request.method === 'POST' && repayMatch) {
-        const advance = repayAdvance(repayMatch[1]);
-        return json(response, 200, { advance, user: getDemoUser() });
+        const advance = collectRepayment(repayMatch[1]);
+        return json(response, 200, { advance, account: getDemoAccount(), user: getDemoUser() });
+      }
+
+
+      if (request.method === 'GET' && url.pathname === '/api/ledger') {
+        return json(response, 200, { ledger: listLedgerEntries() });
+      }
+
+      if (request.method === 'POST' && url.pathname === '/api/bank/webhooks/transactions') {
+        const body = await readBody(request);
+        if (typeof body.providerTransactionId !== 'string' || body.providerTransactionId.length === 0) {
+          return json(response, 400, { error: 'providerTransactionId is required' });
+        }
+        if (typeof body.merchant !== 'string' || body.merchant.length === 0) {
+          return json(response, 400, { error: 'merchant is required' });
+        }
+        if (body.status !== 'pending' && body.status !== 'settled') {
+          return json(response, 400, { error: 'status must be pending or settled' });
+        }
+        if (body.authorizedAmountCents !== undefined && !Number.isInteger(body.authorizedAmountCents)) {
+          return json(response, 400, { error: 'authorizedAmountCents must be an integer' });
+        }
+        if (body.settledAmountCents !== undefined && !Number.isInteger(body.settledAmountCents)) {
+          return json(response, 400, { error: 'settledAmountCents must be an integer' });
+        }
+        const transaction = upsertBankTransaction({ accountId: getDemoAccount().id, ...body });
+        return json(response, 202, { transaction, advances: listAdvances(transaction.userId), account: getDemoAccount() });
       }
 
       if (request.method === 'POST' && url.pathname === '/api/waitlist') {
